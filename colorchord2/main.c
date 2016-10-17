@@ -90,6 +90,45 @@ void HandleMotion( int x, int y, int mask )
 {
 }
 
+#define FILTER_STATS_SIZE 300
+int statsComparer(const void *a, const void *b)
+{
+	float v = (*(float *)a) - (*(float *)b);
+	return (0.f < v) - (v < 0.f);
+}
+void cmcInFilter( float * samples, int count, int channels)
+{
+	static float stats_loudness[FILTER_STATS_SIZE];
+	static int stats_pos = 0;
+	static int init = 0;
+	float s = 0.f;
+	int t = count * channels;
+	for (int i; i < t; i++)
+	{
+		s += samples[i] * samples[i];
+	}
+	s = sqrt(s / count); // RMS - root of the mean of the squares
+
+	stats_loudness[stats_pos] = 20.f * log10(s);
+	stats_pos = (stats_pos + 1) % FILTER_STATS_SIZE;
+	if (!init && stats_pos == FILTER_STATS_SIZE - 1)
+		init = 1;
+
+	float stats_s[FILTER_STATS_SIZE];
+	memcpy(stats_s, stats_loudness, sizeof(stats_loudness[0]) * FILTER_STATS_SIZE);
+	qsort(stats_s, FILTER_STATS_SIZE, sizeof(stats_s[0]), statsComparer);
+	float gain = -14.f - stats_s[(int)(FILTER_STATS_SIZE * 0.95f)];
+	float amp = pow(10, gain / 20);
+	
+	if (init)
+	{
+		for (int i = 0; i < t; i++)
+		{
+			samples[i] *= amp;
+		}
+	}
+}
+
 void SoundCB( float * out, float * in, int samplesr, int * samplesp, struct SoundDriver * sd )
 {
 	int channelin = sd->channelsRec;
@@ -101,6 +140,8 @@ void SoundCB( float * out, float * in, int samplesr, int * samplesp, struct Soun
 
 	int i;
 	int j;
+	
+	cmcInFilter(in, samplesr, sd->channelsRec);
 
 	for( i = 0; i < samplesr; i++ )
 	{
@@ -386,7 +427,7 @@ int main(int argc, char ** argv)
 				CNFGDialogColor = 0x0f0f0f;
 
 				char stdebug[1024];
-				sprintf( stdebug, "DFT:%8.2fms\nFLT:%8.2f\nDEC:%8.2f\nFNL:%8.2f\nDPY:%8.2f",
+				sprintf( stdebug, "DFT:%8.3fms\nFLT:%8.3f\nDEC:%8.3f\nFNL:%8.3f\nDPY:%8.3f",
 					(nf->DFTTime - nf->StartTime)*1000,
 					(nf->FilterTime - nf->DFTTime)*1000,
 					(nf->DecomposeTime - nf->FilterTime)*1000,
